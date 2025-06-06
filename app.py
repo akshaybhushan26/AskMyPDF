@@ -8,10 +8,10 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
 
-# --- Environment and API Configuration ---
+#Environment and API Configuration
 load_dotenv()
 
-# --- Page Configuration ---
+#Page Configuration
 st.set_page_config(
     page_title="AskMyPDF",
     page_icon="📚",
@@ -19,7 +19,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Caching Functions for Efficiency ---
+#Caching Functions for Efficiency
 @st.cache_resource
 def get_openai_client():
     """Initializes and returns the OpenAI client."""
@@ -39,7 +39,7 @@ def get_text_splitter():
         length_function=len
     )
 
-# --- Core Functions ---
+#Core Functions
 def process_and_store_documents(uploaded_files, collection_name="rag_chat_app"):
     """
     Processes uploaded PDF files, splits them into chunks, and stores them in a Qdrant vector store.
@@ -104,7 +104,7 @@ def generate_response(query, vector_store):
             for result in search_results
         ])
 
-        # system prompt
+        # system prompt (where the magic happens)
         system_prompt = f"""
         You are a helpful AI assistant designed to answer user questions based only on the contents of uploaded PDF documents.
         
@@ -127,7 +127,7 @@ def generate_response(query, vector_store):
         # Generate the response
         client = get_openai_client()
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4.1",
             messages=messages,
             temperature=0.1,
         )
@@ -137,9 +137,9 @@ def generate_response(query, vector_store):
         return f"An error occurred while generating the response: {e}"
 
 
-# --- Streamlit UI ---
+#Streamlit UI
 def main():
-    # --- Sidebar ---
+    #Sidebar
     with st.sidebar:
         st.header("📚 AskMyPDF")
         st.write("Upload your PDF documents and get answers to your questions instantly.")
@@ -171,7 +171,7 @@ def main():
         st.divider()
         st.caption("Developed by Akshay Bhushan")
 
-    # --- Main Chat Interface ---
+    #Main Chat Interface
     st.title("Chat with Your Documents")
     st.write("Once your documents are processed, you can ask questions here.")
 
