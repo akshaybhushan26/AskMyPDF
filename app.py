@@ -8,10 +8,12 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
 
-#Environment and API Configuration
+# Load environment variables
 load_dotenv()
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 
-#Page Configuration
+# Page Configuration
 st.set_page_config(
     page_title="AskMyPDF",
     page_icon="📚",
@@ -19,40 +21,32 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-#Caching Functions for Efficiency
+# Caching Functions
 @st.cache_resource
 def get_openai_client():
-    """Initializes and returns the OpenAI client."""
     return openai.OpenAI()
 
 @st.cache_resource
 def get_embedding_model():
-    """Initializes and returns the OpenAI embedding model."""
     return OpenAIEmbeddings(model="text-embedding-3-large")
 
 @st.cache_resource
 def get_text_splitter():
-    """Initializes and returns the text splitter."""
     return RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200,
         length_function=len
     )
 
-#Core Functions
+# Core Function
 def process_and_store_documents(uploaded_files, collection_name="rag_chat_app"):
-    """
-    Processes uploaded PDF files, splits them into chunks, and stores them in a Qdrant vector store.
-    """
     all_split_docs = []
     for uploaded_file in uploaded_files:
         try:
-            # Create a temporary file to store the uploaded content
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                 tmp_file.write(uploaded_file.getvalue())
                 tmp_file_path = tmp_file.name
 
-            # Load the PDF and split it into documents
             loader = PyPDFLoader(tmp_file_path)
             documents = loader.load()
             text_splitter = get_text_splitter()
@@ -62,49 +56,42 @@ def process_and_store_documents(uploaded_files, collection_name="rag_chat_app"):
         except Exception as e:
             st.error(f"Error processing {uploaded_file.name}: {e}")
         finally:
-            # Clean up the temporary file
             if 'tmp_file_path' in locals() and os.path.exists(tmp_file_path):
                 os.unlink(tmp_file_path)
 
     if not all_split_docs:
         st.warning("Could not process any of the documents.")
-        return None
+        return None, 0
 
     try:
         embedding_model = get_embedding_model()
-        # Create or update the Qdrant vector store
         vector_store = Qdrant.from_documents(
             documents=all_split_docs,
             embedding=embedding_model,
-            url="http://localhost:6333",
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY,
+            prefer_grpc=False,
             collection_name=collection_name,
-            force_recreate=True, # Use force_recreate to ensure a fresh start
+            force_recreate=True
         )
         return vector_store, len(all_split_docs)
     except Exception as e:
         st.error(f"Error creating vector store: {e}")
         return None, 0
 
-
 def generate_response(query, vector_store):
-    """
-    Generates a response to a user query using the RAG model.
-    """
     try:
-        # Perform similarity search
         search_results = vector_store.similarity_search(query=query, k=4)
 
         if not search_results:
             return "I couldn't find any relevant information in the uploaded documents."
 
-        # Format the context for the language model
         context = "\n\n---\n\n".join([
             f"Content: {result.page_content}\n"
             f"Source: Page {result.metadata.get('page', 'N/A')} of {os.path.basename(result.metadata.get('source', 'N/A'))}"
             for result in search_results
         ])
 
-        # system prompt (where the magic happens)
         system_prompt = f"""
         You are a helpful AI assistant designed to answer user questions based only on the contents of uploaded PDF documents.
         
@@ -124,10 +111,9 @@ def generate_response(query, vector_store):
             {"role": "user", "content": query}
         ]
 
-        # Generate the response
         client = get_openai_client()
         response = client.chat.completions.create(
-            model="gpt-4.1",
+            model="gpt-4o",  
             messages=messages,
             temperature=0.1,
         )
@@ -136,10 +122,8 @@ def generate_response(query, vector_store):
     except Exception as e:
         return f"An error occurred while generating the response: {e}"
 
-
-#Streamlit UI
+# Streamlit UI
 def main():
-    #Sidebar
     with st.sidebar:
         st.header("📚 AskMyPDF")
         st.write("Upload your PDF documents and get answers to your questions instantly.")
@@ -157,7 +141,7 @@ def main():
                 if vector_store:
                     st.session_state.vector_store = vector_store
                     st.session_state.documents_processed = True
-                    st.session_state.messages = [] # Reset chat on new docs
+                    st.session_state.messages = []
                     st.success(f"✅ Successfully processed {len(uploaded_files)} documents into {num_chunks} chunks.")
                 else:
                     st.error("Failed to process documents. Please try again.")
@@ -171,11 +155,9 @@ def main():
         st.divider()
         st.caption("Developed by Akshay Bhushan")
 
-    #Main Chat Interface
     st.title("Chat with Your Documents")
     st.write("Once your documents are processed, you can ask questions here.")
 
-    # Initialize or display chat messages
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
@@ -183,24 +165,19 @@ def main():
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Handle chat input
     is_chat_disabled = "documents_processed" not in st.session_state
     if prompt := st.chat_input("Ask a question...", disabled=is_chat_disabled):
-        # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # Generate and display assistant response
         with st.chat_message("assistant"):
             with st.spinner("Searching for answers..."):
                 response = generate_response(prompt, st.session_state.vector_store)
                 st.markdown(response)
-        
-        # Add assistant response to chat history
+
         st.session_state.messages.append({"role": "assistant", "content": response})
 
-    # Display initial welcome message if no documents are processed
     if not st.session_state.messages and is_chat_disabled:
         st.info("Upload your PDFs and click 'Process Documents' to get started!")
 
